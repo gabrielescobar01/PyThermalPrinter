@@ -1,0 +1,33 @@
+2025-10-25 22:55:44,930 [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8080
+ * Running on http://192.168.1.210:8080
+2025-10-25 22:55:44,930 [33mPress CTRL+C to quit[0m
+2025-10-25 22:55:59,261 [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8080
+ * Running on http://192.168.1.210:8080
+2025-10-25 22:55:59,261 [33mPress CTRL+C to quit[0m
+2025-10-25 22:57:06,180 Webhook recibido: {'resource': 'https://api.mercadolibre.com/merchant_orders/35033928553', 'topic': 'merchant_order'}
+2025-10-25 22:57:06,181 127.0.0.1 - - [25/Oct/2025 22:57:06] "POST /mp/webhook?id=35033928553&topic=merchant_order HTTP/1.1" 200 -
+2025-10-25 22:57:06,898 Webhook recibido: {'action': 'payment.created', 'api_version': 'v1', 'data': {'id': '131330481822'}, 'date_created': '2025-10-26T01:57:06Z', 'id': 125847981818, 'live_mode': True, 'type': 'payment', 'user_id': '340423884'}
+2025-10-25 22:57:06,898 Webhook recibido: {'resource': '131330481822', 'topic': 'payment'}
+2025-10-25 22:57:06,899 127.0.0.1 - - [25/Oct/2025 22:57:06] "POST /mp/webhook?id=131330481822&topic=payment HTTP/1.1" 200 -
+2025-10-25 22:57:06,944 Webhook recibido: {'resource': 'https://api.mercadolibre.com/merchant_orders/35033928553', 'topic': 'merchant_order'}
+2025-10-25 22:57:06,944 127.0.0.1 - - [25/Oct/2025 22:57:06] "POST /mp/webhook?id=35033928553&topic=merchant_order HTTP/1.1" 200 -
+2025-10-25 22:57:07,638 127.0.0.1 - - [25/Oct/2025 22:57:07] "POST /mp/webhook?data.id=131330481822&type=payment HTTP/1.1" 200 -
+2025-10-25 23:03:42,252 [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8080
+ * Running on http://192.168.1.210:8080
+2025-10-25 23:03:42,252 [33mPress CTRL+C to quit[0m
+2025-10-25 23:06:48,506 [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8080
+ * Running on http://192.168.1.210:8080
+2025-10-25 23:06:48,506 [33mPress CTRL+C to quit[0m
+2025-10-25 23:06:58,785 [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8080
+ * Running on http://192.168.1.210:8080
+2025-10-25 23:06:58,785 [33mPress CTRL+C to quit[0m

@@ -12,7 +12,7 @@ import random  # 👈 nuevo
 # CONFIGURACIÓN PRINCIPAL
 # ====================================================
 ACCESS_TOKEN = "APP_USR-4708500391203353-101921-06630c2067283d942cf41226049b5e51-340423884"
-NGROK_URL = "https://extensively-celiac-magdalen.ngrok-free.dev"
+NGROK_URL = "https://mxtechno.ngrok.app"
 app = Flask(__name__)
 
 # ====================================================

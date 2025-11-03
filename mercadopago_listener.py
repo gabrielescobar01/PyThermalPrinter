@@ -9,8 +9,8 @@ import threading
 # ====================================================
 # CONFIG
 # ====================================================
-ACCESS_TOKEN = "APP_USR-4708500391203353-101921-06630c2067283d942cf41226049b5e51-340423884"
-NGROK_URL = "https://mxtechno.ngrok-free.app"
+ACCESS_TOKEN = "APP_USR-5730383643220019-110217-97d3d4394b8a9e2b9de6ca23cb88ad2e-2959448473"
+NGROK_URL = "https://mxtechno.ngrok.app"
 app = Flask(__name__)
 
 # ====================================================
@@ -323,8 +323,82 @@ def crear_preferencia():
 # ====================================================
 # WEBHOOK DE PAGO (con delay y mensaje previo)
 # ====================================================
+procesados = set()  # 👈 evita duplicados
+
 @app.route("/mp/webhook", methods=["POST"])
 def mp_webhook():
+    data = request.get_json(force=True)
+    print("📩 Notificación de Mercado Pago recibida:", data)
+
+    try:
+        tipo = data.get("type") or data.get("topic")
+        if tipo != "payment":
+            print(f"ℹ️ Ignorando evento tipo '{tipo}'.")
+            return jsonify({"status": "ignored"}), 200
+
+        # 🧠 Detectar ID correctamente, sin importar el formato del JSON
+        payment_id = None
+        if isinstance(data.get("data"), dict):
+            payment_id = data["data"].get("id")
+        elif "resource" in data:
+            payment_id = str(data["resource"]).split("/")[-1]
+        elif "id" in data:
+            payment_id = data["id"]
+
+        if not payment_id:
+            print("⚠️ No se encontró payment_id en la notificación.")
+            return jsonify({"error": "no payment_id"}), 400
+
+        # 🚫 Evitar duplicados
+        if payment_id in procesados:
+            print(f"⚠️ Pago {payment_id} ya procesado, ignorando.")
+            return jsonify({"status": "duplicate"}), 200
+        procesados.add(payment_id)
+
+        # 📡 Obtener detalles del pago
+        headers = {"Authorization": f"Bearer {ACCESS_TOKEN}"}
+        resp = requests.get(f"https://api.mercadopago.com/v1/payments/{payment_id}", headers=headers)
+
+        if resp.status_code != 200:
+            print(f"⚠️ Error al consultar pago {payment_id}: {resp.text}")
+            return jsonify({"error": "no payment found"}), 400
+
+        payment = resp.json()
+        payer = payment.get("payer", {}).get("email", "Desconocido")
+        amount = payment.get("transaction_amount", 0)
+        status = payment.get("status", "unknown")
+
+        print(f"💳 Estado del pago {payment_id}: {status}")
+
+        # 🚫 Solo imprimir si está aprobado
+        if status != "approved":
+            print(f"⚠️ Pago {payment_id} con estado '{status}', no se imprime.")
+            return jsonify({"status": status}), 200
+
+        # 🎟 Clasificar tipo
+        tipo_ticket = "SORTEO" if amount >= 13 else "IMPRESION"
+
+        # --- 💡 IMPRESIÓN RETARDADA ---
+        def delayed_print():
+            try:
+                if printer_ready:
+                    print("🕒 Esperando 6s antes de imprimir...")
+                else:
+                    print("⚠️ Impresora no disponible para mensaje previo.")
+
+                threading.Timer(6.0, print_payment_ticket, args=(payer, amount, status, tipo_ticket)).start()
+            except Exception as e:
+                print(f"⚠️ Error en impresión diferida: {e}")
+
+        threading.Thread(target=delayed_print).start()
+        print(f"🕐 Impresión programada para {payer} (${amount})")
+
+        return jsonify({"status": "ok"}), 200
+
+    except Exception as e:
+        print(f"❌ Error procesando pago: {e}")
+        return jsonify({"error": str(e)}), 500
+
     data = request.get_json(force=True)
     print("📩 Notificación de Mercado Pago recibida:", data)
 

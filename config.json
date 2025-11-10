@@ -1,6 +1,7 @@
 {
-  "gifts": false,
-  "likes": false,
+  "gifts": true,
+  "likes": true,
   "comments": true,
+  "shares": true,
   "tts": false
 }

@@ -11,7 +11,7 @@ import random  # 👈 nuevo
 # ====================================================
 # CONFIGURACIÓN PRINCIPAL
 # ====================================================
-ACCESS_TOKEN = "APP_USR-4708500391203353-101921-06630c2067283d942cf41226049b5e51-340423884"
+ACCESS_TOKEN = "APP_USR-5730383643220019-110217-97d3d4394b8a9e2b9de6ca23cb88ad2e-2959448473"
 NGROK_URL = "https://mxtechno.ngrok.app"
 app = Flask(__name__)
 
@@ -32,9 +32,14 @@ except Exception as e:
 # ====================================================
 def _safe_font(size=28):
     try:
-        return ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", size)
-    except IOError:
+        # Usa Arial directamente desde Windows
+        font_path = "C:\\Windows\\Fonts\\arial.ttf"
+        size = int(size * 3.5)  # 🔹 factor grande para compensar DPI
+        return ImageFont.truetype(font_path, size)
+    except Exception as e:
+        print(f"⚠️ Error cargando fuente Arial: {e}")
         return ImageFont.load_default()
+
 
 def render_centered_text(lines, sizes, width=512, padding_y=15, gap=6):
     fonts = [_safe_font(sz) for sz in sizes]

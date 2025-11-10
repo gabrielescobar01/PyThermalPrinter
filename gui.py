@@ -17,7 +17,7 @@ root.title("Panel TikTok Printer")
 
 label_vars = {}
 
-for opt in ["gifts", "likes", "comments", "tts"]:
+for opt in ["gifts", "likes", "comments", "tts", "shares"]:
     label_vars[opt] = tk.StringVar()
     label_vars[opt].set(f"{opt.capitalize()}: ON")
     tk.Button(root, textvariable=label_vars[opt], command=lambda o=opt: toggle_option(o), width=20).pack(pady=5)

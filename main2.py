@@ -2,14 +2,32 @@ import pyttsx3
 import asyncio
 from escpos.printer import Usb
 from TikTokLive import TikTokLiveClient
-from TikTokLive.events import GiftEvent, CommentEvent
+from TikTokLive.events import GiftEvent, CommentEvent, ShareEvent
 import requests
 from PIL import Image, ImageDraw, ImageFont
 import os
 import json
 import threading
 import time
+import socket
 from PIL import ImageEnhance, ImageOps
+
+# =========================================
+# 🖨️ CLIENTE → SERVIDOR DE IMPRESIÓN
+# =========================================
+
+
+def enviar_a_impresora(payload):
+    """Envía un diccionario JSON al servidor de impresión"""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.connect(("127.0.0.1", 6000))
+        s.send(json.dumps(payload).encode("utf-8"))
+        s.close()
+        print(f"📨 Enviado a servidor de impresión ({payload.get('tipo', 'N/A')})")
+    except Exception as e:
+        print(f"⚠️ Error al conectar con servidor de impresión: {e}")
+
 
 # ============ CONFIG ============
 
@@ -89,18 +107,9 @@ engine = pyttsx3.init()
 engine.setProperty("rate", 180)
 engine.setProperty("voice", "spanish")  # podés cambiarlo por otra voz disponible
 
-# ============ IMPRESORA ============
-try:
-    p = Usb(0x067b, 0x2305, 0, profile="TM-T88III", encoding="utf-8")
-    print("Printer initialized")
-    printer_ready = True
-except Exception as e:
-    print(f"Error initializing printer: {e}")
-    printer_ready = False
-
 
 # ============ TIKTOK ============
-client = TikTokLiveClient(unique_id="brendaesc")  # <- sin @
+client = TikTokLiveClient(unique_id="s1mple.god")  # <- sin @
 print("TikTokLive client initialized")
 
 config = load_config()
@@ -166,7 +175,7 @@ def get_user_avatar_url(user):
     return None
 
 
-def _safe_font(size=30):
+def _safe_font(size=20):
     try:
         return ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", size)
     except IOError:
@@ -219,71 +228,98 @@ def create_rounded_profile_image(profile_img):
 
     return final
 
-def create_combined_image(profile_img, gift_img, user_name, gift_name, streak_text, total_gifts=1):
-    """Estilo MXTechno: circular + contador + etiqueta + thank you"""
-    # Perfil ya viene optimizado en B/N
-    profile_img = create_rounded_profile_image(profile_img)
+def _pick_bold_font(size):
+    # Windows
+    if os.name == "nt":
+        for path in [
+            r"C:\Windows\Fonts\arialbd.ttf",
+            r"C:\Windows\Fonts\segoeuib.ttf",
+            r"C:\Windows\Fonts\segoeuib.ttf",
+        ]:
+            if os.path.exists(path):
+                return ImageFont.truetype(path, size)
+    # Linux
+    for path in [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+    ]:
+        if os.path.exists(path):
+            return ImageFont.truetype(path, size)
+    return ImageFont.load_default()
 
-    # Fondo blanco para el ícono del regalo
+
+def create_combined_image(profile_img, gift_img, user_name, gift_name, streak_text, total_gifts=1):
+    """🎨 Estética del código USB, adaptada al servidor de impresión"""
+    profile_img = create_rounded_profile_image(profile_img)
+    W = 512
+    spacing = 15
+
+    # 🟢 Avatar grande y balanceado
+    profile_img = profile_img.resize((370, 370), Image.LANCZOS)
+
+    # 🟢 Ícono del regalo con fondo blanco y tamaño correcto
     gift_img = gift_img.convert("RGBA")
     white_bg = Image.new("RGB", gift_img.size, (255, 255, 255))
     white_bg.paste(gift_img, mask=gift_img.split()[-1] if gift_img.mode == "RGBA" else None)
-    gift_img = white_bg.convert("L").resize((70, 70), Image.LANCZOS)
+    gift_img = white_bg.convert("L").resize((65, 65), Image.LANCZOS)
 
-    # Fuentes
-    font_label = _safe_font(36)      # nombre con fondo negro
-    font_thanks = _safe_font(28)     # "Thank you for..."
-    font_streak = _safe_font(26)
-    font_counter = _safe_font(42)    # x120
-    spacing = 15
-    max_width = 512
+    # 🟢 Fuentes
+    font_counter = _pick_bold_font(68)
+    font_user = _pick_bold_font(46)
+    font_thanks = _pick_bold_font(42)
+    font_streak = _pick_bold_font(38)
+    font_sep = _pick_bold_font(26)
 
-    # Crear lienzo
-    total_height = profile_img.height + 230
-    canvas = Image.new("L", (max_width, total_height), 255)
+    # 🟢 Lienzo general
+    total_height = profile_img.height + 300
+    canvas = Image.new("L", (W, total_height), 255)
     draw = ImageDraw.Draw(canvas)
-
     y = spacing
 
-    # 1️⃣ Imagen circular centrada
-    x_profile = (max_width - profile_img.width) // 2
+    # 🔸 Avatar centrado
+    x_profile = (W - profile_img.width) // 2
     canvas.paste(profile_img, (x_profile, y))
+    y += profile_img.height - 25
 
-    # 2️⃣ Texto sobre la imagen (contador del gift)
+    # 🔸 Contador y gift a la derecha (ajustados)
     counter_text = f"x{total_gifts}"
     bbox = draw.textbbox((0, 0), counter_text, font=font_counter)
-    text_x = x_profile + profile_img.width - bbox[2] - 15
-    text_y = y + profile_img.height - bbox[3] - 15
-    draw.text((text_x, text_y), counter_text, fill=0, font=font_counter)
+    cx = x_profile + profile_img.width - bbox[2] + 15
+    cy = y - bbox[3] - 5
+    draw.text((cx, cy), counter_text, fill=0, font=font_counter)
+    canvas.paste(gift_img, (cx - 60, cy + 5))
 
-    # 3️⃣ (Opcional) Ícono del regalo al lado del contador
-    gift_resized = gift_img.resize((50, 50), Image.LANCZOS)
-    canvas.paste(gift_resized, (text_x - 55, text_y + 5))
+    # 🔸 Texto debajo del avatar
+    y = profile_img.height + spacing + 10
 
-    y += profile_img.height + spacing
-
-    # 4️⃣ Etiqueta del usuario (nombre con fondo negro)
-    username_bbox = draw.textbbox((0, 0), user_name, font=font_label)
-    label_w = username_bbox[2] + 40
-    label_h = username_bbox[3] + 10
-    label_x = (max_width - label_w) // 2
+    # Bloque negro con usuario en blanco
+    bbox_user = draw.textbbox((0, 0), user_name, font=font_user)
+    label_w = bbox_user[2] + 40
+    label_h = bbox_user[3] + 14
+    label_x = (W - label_w) // 2
     label_y = y
     draw.rectangle([label_x, label_y, label_x + label_w, label_y + label_h], fill=0)
-    draw.text((label_x + 20, label_y + 5), user_name, fill=255, font=font_label)
-    y += label_h + spacing
+    draw.text((label_x + 20, label_y + 7), user_name, fill=255, font=font_user)
+    y += label_h + 14
 
-    # 5️⃣ Línea "Thank you for Xx Gift"
-    thank_text = f"Thank you for {total_gifts}x {gift_name}"
-    bbox2 = draw.textbbox((0, 0), thank_text, font=font_thanks)
-    draw.text(((max_width - bbox2[2]) // 2, y), thank_text, fill=0, font=font_thanks)
-    y += 50
+    # Línea “Gift xN”
+    thanks_text = f"{gift_name} x{total_gifts}"
+    bbox_thanks = draw.textbbox((0, 0), thanks_text, font=font_thanks)
+    draw.text(((W - bbox_thanks[2]) // 2, y), thanks_text, fill=0, font=font_thanks)
+    y += bbox_thanks[3] + 10
 
-    # 6️⃣ Línea punteada de separación
-    sep_text = "-" * 30
-    bbox_sep = draw.textbbox((0, 0), sep_text, font=font_streak)
-    draw.text(((max_width - bbox_sep[2]) // 2, y), sep_text, fill=0, font=font_streak)
+    # Línea “Racha de: N”
+    bbox_streak = draw.textbbox((0, 0), streak_text, font=font_streak)
+    draw.text(((W - bbox_streak[2]) // 2, y), streak_text, fill=0, font=font_streak)
+    y += bbox_streak[3] + 10
+
+    # Línea separadora
+    sep = "-" * 32
+    bbox_sep = draw.textbbox((0, 0), sep, font=font_sep)
+    draw.text(((W - bbox_sep[2]) // 2, y), sep, fill=0, font=font_sep)
 
     return canvas
+
 
 # ============ HANDLERS ============
 
@@ -315,7 +351,7 @@ async def handle_gift_end(user_id):
         if gift_img is None:
             gift_img = Image.open(FALLBACK_GIFT_PATH)
 
-        # --- Asegurar fondo blanco sin negro ---
+        # Fondo blanco si trae alpha
         if gift_img.mode in ("RGBA", "LA"):
             bg = Image.new("RGB", gift_img.size, (255, 255, 255))
             bg.paste(gift_img, mask=gift_img.split()[-1])
@@ -334,15 +370,11 @@ async def handle_gift_end(user_id):
                 profile_img = Image.open("tmp_avatar.webp")
             except Exception as e:
                 print(f"⚠️ Error al bajar avatar ({e}), usando gris.")
-                profile_img = Image.new("RGB", (350, 350))
+                profile_img = Image.new("RGB", (350, 350), "gray")
         else:
             profile_img = Image.new("RGB", (350, 350), "gray")
 
-            print(f"🖼️ Guardando avatar temporal: {profile_url}")
-            profile_img.save("debug_avatar_original.jpg")
-            profile_img.show()
-
-        # --- Convertir RGBA -> fondo blanco y mejorar visibilidad ---
+        # Mejoras para térmica
         if profile_img.mode in ("RGBA", "LA"):
             bg = Image.new("RGB", profile_img.size, (255, 255, 255))
             bg.paste(profile_img, mask=profile_img.split()[-1])
@@ -350,7 +382,6 @@ async def handle_gift_end(user_id):
         else:
             profile_img = profile_img.convert("RGB")
 
-        # --- Mejorar brillo/contraste para térmica ---
         profile_img = ImageEnhance.Brightness(profile_img).enhance(1.3)
         profile_img = ImageEnhance.Contrast(profile_img).enhance(1.5)
         profile_img = ImageOps.autocontrast(profile_img)
@@ -365,22 +396,33 @@ async def handle_gift_end(user_id):
             total_gifts=streak
         )
 
+        # Guardar como BMP 1-bit, ruta absoluta
         bw_img = combined_img.convert("1")
-        bw_img.save("gift_ticket.bmp")
+        gift_path = os.path.abspath("gift_ticket.bmp")
+        bw_img.save(gift_path)
+        bw_img.close()
+        time.sleep(0.3)
 
-        # ---------- IMPRESIÓN ----------
-        if printer_ready:
-            p.text("\n")
-            p.image("gift_ticket.bmp", high_density_vertical=True, high_density_horizontal=True)
-            p.cut()
-            print("✅ Gift impreso correctamente, con imagen visible y sin fondo negro.")
+        if os.path.exists(gift_path) and os.path.getsize(gift_path) > 0:
+            enviar_a_impresora({
+                "tipo": "imagen",
+                "imagenes": [gift_path]
+            })
+            print(f"🖨️ Gift enviado al servidor (imagen): {gift_path}")
         else:
-            bw_img.show()
-            print("⚠️ Impresora no disponible, simulación en pantalla.")
+            print("⚠️ Archivo gift_ticket.bmp no generado correctamente.")
+            return
+
+        enviar_a_impresora({
+            "tipo": "texto",
+            "contenido": texto,
+            "modo_directo": True
+        })
+
+        print("✅ Gift enviado al servidor (imagen + texto térmico grande).")
 
     except Exception as e:
-        print(f"❌ Error al manejar gift: {e}")
-
+        print(f"⚠️ Error al enviar gift al servidor: {e}")
     finally:
         del user_streaks[user_id]
 
@@ -476,13 +518,9 @@ async def on_comment(event: CommentEvent):
     last_comment = {"user_id": user_id, "comment_text": comment_text}
     print(f"{user_id}: {comment_text}")
 
-    if printer_ready:
-        p.set(align="center", bold=True)
-        p.text(f"{user_id}:\n")
-        p.set(align="center", bold=False)
-        p.text(f"{comment_text}\n")
-        p.text("-" * 32 + "\n")
-        p.set(align="left")
+    texto = f"{user_id}:\n{comment_text}\n{'-'*32}\n"
+    payload = {"tipo": "texto", "contenido": texto}
+    enviar_a_impresora(payload)
 
 
 # ====== likes =========
@@ -494,13 +532,12 @@ last_like = {"user_id": None, "count": 0}
 async def on_like(event: LikeEvent):
     global last_like
 
-    # Leer config en tiempo real
     try:
         with open(CONFIG_FILE, "r") as f:
             current_config = json.load(f)
     except Exception as e:
         print(f"⚠️ Error leyendo config.json: {e}")
-        current_config = config  # fallback
+        current_config = config
 
     if not current_config.get("likes", True):
         print("❤️ Likes desactivados por configuración.")
@@ -510,62 +547,52 @@ async def on_like(event: LikeEvent):
     like_count = getattr(event, "likes", 0)
     total_likes = getattr(event, "total_likes", 0)
 
-    # Evitar duplicados
     if last_like["user_id"] == user_id and last_like["count"] == total_likes:
         return
     last_like = {"user_id": user_id, "count": total_likes}
 
     print(f"❤ {user_id} dio {like_count} likes (total {total_likes})")
 
-    if printer_ready:
-        try:
-            # 1) Bloque principal (corazón + like + usuario) centrado
-            main_text = f"❤ LIKE de {user_id} ❤"
-            offset_px = current_config.get("center_offset_px", 0)  # calibra acá si hace falta
-            main_img = render_centered_block(
-                lines=[main_text],
-                font_sizes=[26],     # más chico que antes, como pediste
-                max_width=512,
-                padding_y=10,
-                line_gap=6,
-                offset_x=offset_px
-            )
+    # 💬 Enviar texto nativo al servidor
+    texto = (
+        f"\n\n  LIKE de {user_id}  \n"
+        f"{'-'*32}\n\n"
+    )
 
-            # 2) Línea separadora como imagen (no con p.text)
-            sep_text  = "-------------------------------"
-            sep_img = render_centered_block(
-                lines=[sep_text],
-                font_sizes=[18],
-                max_width=512,
-                padding_y=6,
-                line_gap=0,
-                offset_x=offset_px
-            )
-
-            # 3) (Opcional) Total de likes como segunda línea centrada
-            total_line = f"Total likes: {total_likes}"
-            total_img = render_centered_block(
-                lines=[total_line],
-                font_sizes=[20],
-                max_width=512,
-                padding_y=6,
-                line_gap=0,
-                offset_x=offset_px
-            )
-
-            # 4) Imprimir todo
-            main_img.save("like_main.bmp")
-            sep_img.save("like_sep.bmp")
-            total_img.save("like_total.bmp")
-
-            p.image("like_main.bmp")
-            p.image("like_sep.bmp")
-            p.image("like_total.bmp")
+    payload = {
+        "tipo": "texto",
+        "contenido": texto
+    }
+    enviar_a_impresora(payload)
+    print("🖨️ Like enviado al servidor (tamaño igual al de comentarios).")
 
 
-            print("🖨️ Like impreso centrado de forma precisa ❤")
-        except Exception as e:
-            print(f"Error imprimiendo like: {e}")
+@client.on(ShareEvent)
+async def on_share(event: ShareEvent):
+    try:
+        with open(CONFIG_FILE, "r") as f:
+            current_config = json.load(f)
+    except Exception as e:
+        print(f"⚠️ Error leyendo config.json en share: {e}")
+        current_config = config
+
+    if not current_config.get("shares", True):
+        print("🔄 Compartir desactivado por configuración.")
+        return
+
+    user_id = event.user.unique_id
+    print(f"🔄 {user_id} compartió el stream")
+
+    texto = (
+        f"\n\n  {user_id} compartio el LIVE!  \n"
+        f"{'-'*32}\n\n"
+    )
+    payload = {
+        "tipo": "texto",
+        "contenido": texto
+    }
+    enviar_a_impresora(payload)
+    print("🖨️ Share enviado al servidor (igual estilo que like).")
 
 # ============ MAIN ============
 

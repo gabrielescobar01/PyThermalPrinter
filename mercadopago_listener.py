@@ -1,9 +1,13 @@
 from flask import Flask, request, jsonify, render_template_string, redirect
-import requests, os, json, random
+import requests
+import os
+import json
+import random
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 from escpos.printer import Usb
 from datetime import datetime
 import threading
+import socket, json
 
 
 # ====================================================
@@ -16,26 +20,39 @@ app = Flask(__name__)
 # ====================================================
 # IMPRESORA
 # ====================================================
-try:
-    p = Usb(0x067b, 0x2305, 0, profile="TM-T88III", encoding="utf-8")
-    p.profile.media["width"]["pixel"] = 512
-    printer_ready = True
-    print("🖨️ Impresora lista para Mercado Pago")
-except Exception as e:
-    printer_ready = False
-    print(f"⚠️ Error iniciando impresora: {e}")
+
+
+def enviar_a_impresora(texto, tipo="texto"):
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.connect(("127.0.0.1", 6000))
+    payload = json.dumps({"tipo": tipo, "contenido": texto})
+    s.send(payload.encode("utf-8"))
+    s.close()
 
 # ====================================================
 # UTILIDADES GRÁFICAS
 # ====================================================
+
+
 def _safe_font(size=28):
     try:
-        return ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", size)
-    except IOError:
+        # Usa Arial directamente desde Windows
+        font_path = "C:\\Windows\\Fonts\\arial.ttf"
+        size = int(size * 1.1)  # 🔹 factor grande para compensar DPI
+        return ImageFont.truetype(font_path, size)
+    except Exception as e:
+        print(f"⚠️ Error cargando fuente Arial: {e}")
         return ImageFont.load_default()
 
-def render_centered_text(lines, sizes, width=512, padding_y=15, gap=6):
+
+def render_centered_text(lines, sizes, width=512, padding_y=15, gap=6, bold_lines=None):
+    """
+    Dibuja texto centrado con opción de líneas en negrita (simulada).
+    bold_lines: lista de índices de líneas que deben imprimirse en negrita
+    """
+    bold_lines = bold_lines or []
     fonts = [_safe_font(sz) for sz in sizes]
+
     tmp = Image.new("L", (1, 1), 255)
     dtmp = ImageDraw.Draw(tmp)
     widths, heights = [], []
@@ -46,15 +63,25 @@ def render_centered_text(lines, sizes, width=512, padding_y=15, gap=6):
     total_h = padding_y * 2 + sum(heights) + gap * (len(lines) - 1)
     img = Image.new("L", (width, total_h), 255)
     draw = ImageDraw.Draw(img)
+
     y = padding_y
-    for line, fnt, w, h in zip(lines, fonts, widths, heights):
+    for i, (line, fnt, w, h) in enumerate(zip(lines, fonts, widths, heights)):
         x = (width - w) // 2
-        draw.text((x, y), line, fill=0, font=fnt)
+
+        # 💪 Simulación de negrita (dibujar dos veces con desplazamiento)
+        if i in bold_lines:
+            draw.text((x, y), line, fill=0, font=fnt)
+            draw.text((x + 1, y), line, fill=0, font=fnt)
+        else:
+            draw.text((x, y), line, fill=0, font=fnt)
+
         y += h + gap
+
     return img
 
+
 # ====================================================
-# ICONOS ALEATORIOS
+# ICONOS ALEATORIOS + FONDO ESTILO TABLERO
 # ====================================================
 AVATAR_CACHE_DIR = "avatars"
 os.makedirs(AVATAR_CACHE_DIR, exist_ok=True)
@@ -64,72 +91,189 @@ ICONOS = [
     os.path.join(AVATAR_CACHE_DIR, "icon_sonrisa.png")
 ]
 
+
 def elegir_icono_aleatorio():
     disponibles = [i for i in ICONOS if os.path.exists(i)]
     if disponibles:
         return random.choice(disponibles)
     return None
 
+
+def generar_fondo_tablero(width=512, height=512, tamaño_celda=32):
+    img = Image.new("L", (width, height), 255)
+    draw = ImageDraw.Draw(img)
+    color1, color2 = 200, 150
+    for y in range(0, height, tamaño_celda):
+        for x in range(0, width, tamaño_celda):
+            color = color1 if (x // tamaño_celda + y //
+                               tamaño_celda) % 2 == 0 else color2
+            draw.rectangle(
+                [x, y, x + tamaño_celda, y + tamaño_celda], fill=color)
+    return img
+
+
 def preparar_icono_para_ticket(icono_path, max_width=384):
     try:
-        img = Image.open(icono_path).convert("L")
-        w, h = img.size
+        # Abrimos el ícono con transparencia
+        icon = Image.open(icono_path).convert("RGBA")
+        w, h = icon.size
         if w > max_width:
             new_h = int(h * (max_width / w))
-            img = img.resize((max_width, new_h), Image.LANCZOS)
-            w, h = img.size
-        canvas = Image.new("L", (512, h), 255)
+            icon = icon.resize((max_width, new_h), Image.LANCZOS)
+            w, h = icon.size
+
+        # Fondo tipo tablero (escala de grises)
+        fondo = generar_fondo_tablero(512, h)
+        fondo = fondo.convert("RGBA")  # lo pasamos a RGBA para poder pegar
+
+        # Centrar el ícono sobre el fondo con transparencia
         x_offset = (512 - w) // 2
-        canvas.paste(img, (x_offset, 0))
+        # 👈 tercer parámetro = máscara alfa
+        fondo.paste(icon, (x_offset, 0), icon)
+
+        # Convertimos todo a escala de grises antes de imprimir
+        final = fondo.convert("L")
         out_path = "icon_temp.bmp"
-        canvas.save(out_path, format="BMP")
+        final.save(out_path, format="BMP")
         return out_path
     except Exception as e:
-        print(f"⚠️ Error ajustando icono: {e}")
+        print(f"⚠️ Error generando fondo del icono: {e}")
         return icono_path
 
+
 # ====================================================
-# IMPRESIÓN DE TICKET
+# IMPRESIÓN DE TICKET ESTILIZADA
 # ====================================================
 def print_payment_ticket(payer, amount, status, tipo):
     now = datetime.now().strftime("%d/%m/%Y %H:%M")
     ref = "#" + str(random.randint(10000, 99999))
-    if tipo == "SORTEO":
-        header = "🎟 PARTICIPANTE VIP 🎟"
-        footer = "Estás participando del sorteo en vivo!"
-    else:
-        header = "💰 DONACIÓN RECIBIDA 💰"
-        footer = "Gracias por tu apoyo ❤️"
 
+    # =========================================
+    # 💎 Texto diferenciado por tipo
+    # =========================================
+    if tipo == "SORTEO":
+        header = "⧫ PARTICIPANTE VIP ⧫"
+        footer = [
+            "✨ ¡Estás participando del sorteo en vivo! ✨",
+            f"N° de participación: {random.randint(1000, 9999)}",
+            "Seguime en IG: @maxii.agueroo"
+        ]
+        accent_line = "/ / /" * 18
+    else:
+        header = "$  PAGO RECIBIDO  $"
+        footer = [
+            "♥ Gracias por tu apoyo ♥",
+            "Seguime en IG: @maxii.agueroo"
+        ]
+        accent_line = "=" * 30
+
+    # =========================================
+    # 🖋️ Diseño del texto
+    # =========================================
     lines = [
-        "================================",
+        accent_line,
         header,
-        "================================",
-        f"Usuario: {payer}",
+        accent_line,
+        "",
+        f"Usuario:",
+        f"{payer}",
+        "",
         f"Monto: ${amount}",
         f"Fecha: {now}",
-        f"Ref: {ref}",
-        "-------------------------------",
-        footer,
-        "================================"
+        "",
+        "-----------------------------",
+        *footer,
+        "-----------------------------"
     ]
-    sizes = [20, 30, 20, 26, 26, 22, 22, 22, 22]
 
-    img = render_centered_text(lines, sizes)
+    # Escalado de fuente más llamativo
+    if tipo == "SORTEO":
+        sizes = [28, 46, 28, 16, 26, 30, 18, 32, 28, 24, 18, 26, 22, 22]
+    else:
+        sizes = [24, 38, 24, 16, 26, 30, 18, 30, 26, 22, 18, 24, 22, 22]
+
+    # 💥 Negrita en el header y separadores
+    bold_indices = [1, 2]
+    img = render_centered_text(lines, sizes, bold_lines=bold_indices)
     img.save("mp_ticket.bmp")
 
-    icono = elegir_icono_aleatorio()
-    if printer_ready:
-        p.text("\n")
-        if icono and os.path.exists(icono):
-            icono_ajustado = preparar_icono_para_ticket(icono)
-            p.image(icono_ajustado, high_density_horizontal=True, high_density_vertical=True)
-        p.image("mp_ticket.bmp", high_density_horizontal=True, high_density_vertical=True)
-        p.cut()
-        print("🧾 Ticket impreso correctamente.")
+# =========================================
+# 🖼️ Logo según tipo de ticket
+# =========================================
+    if tipo == "SORTEO":
+        vip_path = os.path.join(AVATAR_CACHE_DIR, "icon_vip.png")
+        logo_mp_path = os.path.join(AVATAR_CACHE_DIR, "logo_mp.png")
+        if os.path.exists(vip_path):
+            try:
+                # VIP grande centrado
+                vip = Image.open(vip_path).convert("RGBA")
+                vip_w = 400
+                ratio = vip_w / vip.width
+                vip = vip.resize((vip_w, int(vip.height * ratio)), Image.LANCZOS)
+                canvas = Image.new("RGBA", (512, vip.height + 60), (255, 255, 255, 255))
+                x_offset = (512 - vip.width) // 2
+                canvas.paste(vip, (x_offset, 20), vip)
+
+                # Logo MP pequeño en esquina inferior derecha
+                if os.path.exists(logo_mp_path):
+                    logo = Image.open(logo_mp_path).convert("RGBA")
+                    logo = logo.resize((90, int(logo.height * (90 / logo.width))), Image.LANCZOS)
+                    canvas.paste(logo, (512 - logo.width - 10, canvas.height - logo.height - 10), logo)
+
+                final_logo = canvas.convert("L")
+                final_logo = ImageOps.invert(final_logo)
+                final_logo.save("logo_final.bmp", "BMP")
+
+            except Exception as e:
+                print(f"⚠️ Error generando logo VIP: {e}")
     else:
-        img.show()
-        print("⚠️ Impresora no disponible (simulación).")
+        logo_path = os.path.join(AVATAR_CACHE_DIR, "logo_mp.png")
+        if os.path.exists(logo_path):
+            try:
+                logo = Image.open(logo_path).convert("RGBA")
+                logo_w = 350
+                ratio = logo_w / logo.width
+                logo = logo.resize((logo_w, int(logo.height * ratio)), Image.LANCZOS)
+
+                # Fondo blanco simple, sin tablero
+                fondo = Image.new("RGBA", (512, logo.height + 40), (255, 255, 255, 255))
+                x_offset = (512 - logo.width) // 2
+                fondo.paste(logo, (x_offset, 20), logo)
+
+                final_logo = fondo.convert("L")
+                final_logo = ImageOps.invert(final_logo)
+                final_logo.save("logo_final.bmp", "BMP")
+
+            except Exception as e:
+                print(f"⚠️ Error generando logo Mercado Pago: {e}")
+    # =========================================
+    # 🖨️ Envío al servidor de impresión
+    # =========================================
+    try:
+        payload = {
+            "tipo": "imagen",
+            "imagenes": []
+        }
+
+        # Logo
+        if os.path.exists("logo_final.bmp"):
+            payload["imagenes"].append("logo_final.bmp")
+
+        # Texto del ticket
+        if os.path.exists("mp_ticket.bmp"):
+            payload["imagenes"].append("mp_ticket.bmp")
+
+        # Enviar al servidor de impresión
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.connect(("127.0.0.1", 6000))
+        s.send(json.dumps(payload).encode("utf-8"))
+        s.close()
+
+        print(f"🧾 Ticket enviado al servidor ({tipo})")
+
+    except Exception as e:
+        print(f"⚠️ Error al enviar ticket: {e}")
+
 
 # ====================================================
 # RUTA: FORMULARIO DE DONACIÓN LIBRE
@@ -292,6 +436,7 @@ HTML_FORM = """
 def index():
     return render_template_string(HTML_FORM)
 
+
 @app.route("/crear_preferencia", methods=["POST"])
 def crear_preferencia():
     monto = float(request.form.get("monto", 0))
@@ -314,16 +459,19 @@ def crear_preferencia():
         "auto_return": "approved"
     }
     headers = {"Authorization": f"Bearer {ACCESS_TOKEN}"}
-    r = requests.post("https://api.mercadopago.com/checkout/preferences", headers=headers, json=data)
+    r = requests.post(
+        "https://api.mercadopago.com/checkout/preferences", headers=headers, json=data)
     r.raise_for_status()
     init_point = r.json()["init_point"]
     print(f"✅ Donación creada: ${monto} -> {init_point}")
     return redirect(init_point)
 
+
 # ====================================================
 # WEBHOOK DE PAGO (con delay y mensaje previo)
 # ====================================================
 procesados = set()  # 👈 evita duplicados
+
 
 @app.route("/mp/webhook", methods=["POST"])
 def mp_webhook():
@@ -357,14 +505,76 @@ def mp_webhook():
 
         # 📡 Obtener detalles del pago
         headers = {"Authorization": f"Bearer {ACCESS_TOKEN}"}
-        resp = requests.get(f"https://api.mercadopago.com/v1/payments/{payment_id}", headers=headers)
+        resp = requests.get(
+            f"https://api.mercadopago.com/v1/payments/{payment_id}", headers=headers)
 
         if resp.status_code != 200:
             print(f"⚠️ Error al consultar pago {payment_id}: {resp.text}")
             return jsonify({"error": "no payment found"}), 400
 
         payment = resp.json()
-        payer = payment.get("payer", {}).get("email", "Desconocido")
+
+                # --- Datos del comprador ---
+        payer_data = payment.get("payer", {})
+        payer_id = payer_data.get("id")
+        payer_first = payer_data.get("first_name", "")
+        payer_last = payer_data.get("last_name", "")
+        payer_email = payer_data.get("email", "")
+
+        # 👤 Nombre del titular de la tarjeta (por si no tiene cuenta)
+        card_info = payment.get("card", {}) or {}
+        cardholder = card_info.get("cardholder", {})
+        holder_name = cardholder.get("name", "")
+
+        payer = "Desconocido"
+
+        # 🧠 Intentar obtener nombre completo desde la cuenta de MP
+        if payer_id:
+            try:
+                headers = {"Authorization": f"Bearer {ACCESS_TOKEN}"}
+                user_resp = requests.get(f"https://api.mercadopago.com/users/{payer_id}", headers=headers)
+                if user_resp.status_code == 200:
+                    user_data = user_resp.json()
+                    first_name = user_data.get("first_name", "")
+                    last_name = user_data.get("last_name", "")
+                    if first_name or last_name:
+                        payer = f"{first_name} {last_name}".strip()
+            except Exception as e:
+                print(f"⚠️ Error consultando /users/{payer_id}: {e}")
+
+        # Si sigue vacío, usar los otros campos como respaldo
+        if payer == "Desconocido":
+            if payer_first or payer_last:
+                payer = f"{payer_first} {payer_last}".strip()
+            elif holder_name:
+                payer = holder_name.strip()
+            elif payer_email:
+                payer = payer_email.split("@")[0]
+
+        payer = payer or "Desconocido"
+
+
+        # 🔍 Si Mercado Pago nos da un ID de usuario, consultamos /users/{payer_id}
+        if payer_id:
+            try:
+                headers = {"Authorization": f"Bearer {ACCESS_TOKEN}"}
+                user_info = requests.get(f"https://api.mercadopago.com/users/{payer_id}", headers=headers).json()
+                first_name = user_info.get("first_name", "")
+                last_name = user_info.get("last_name", "")
+                if first_name or last_name:
+                    payer = f"{first_name} {last_name}".strip()
+            except Exception as e:
+                print(f"⚠️ Error consultando datos del usuario: {e}")
+
+        # Si no hay nombre, usamos las otras fuentes
+        if payer == "Desconocido":
+            if payer_first or payer_last:
+                payer = f"{payer_first} {payer_last}".strip()
+            elif holder_name:
+                payer = holder_name.strip()
+            elif payer_email:
+                payer = payer_email.split("@")[0]
+
         amount = payment.get("transaction_amount", 0)
         status = payment.get("status", "unknown")
 
@@ -372,83 +582,41 @@ def mp_webhook():
 
         # 🚫 Solo imprimir si está aprobado
         if status != "approved":
-            print(f"⚠️ Pago {payment_id} con estado '{status}', no se imprime.")
+            print(
+                f"⚠️ Pago {payment_id} con estado '{status}', no se imprime.")
             return jsonify({"status": status}), 200
 
         # 🎟 Clasificar tipo
-        tipo_ticket = "SORTEO" if amount >= 13 else "IMPRESION"
+        # 🎟 Clasificar tipo según monto
+        if amount >= 1500:
+          tipo_ticket = "SORTEO"
+        elif amount >= 300:
+          tipo_ticket = "IMPRESION"
+        else:
+          print(f"⚠️ Donación de ${amount} ignorada (menor a $300).")
+          return jsonify({"status": "ignored"}), 200
+
 
         # --- 💡 IMPRESIÓN RETARDADA ---
         def delayed_print():
             try:
-                if printer_ready:
-                    print("🕒 Esperando 6s antes de imprimir...")
-                else:
-                    print("⚠️ Impresora no disponible para mensaje previo.")
-
-                threading.Timer(6.0, print_payment_ticket, args=(payer, amount, status, tipo_ticket)).start()
+                print("🕒 Esperando 6s antes de imprimir...")
+                threading.Timer(6.0, print_payment_ticket, args=(
+                    payer, amount, status, tipo_ticket)).start()
             except Exception as e:
                 print(f"⚠️ Error en impresión diferida: {e}")
 
         threading.Thread(target=delayed_print).start()
         print(f"🕐 Impresión programada para {payer} (${amount})")
 
+
         return jsonify({"status": "ok"}), 200
 
     except Exception as e:
         print(f"❌ Error procesando pago: {e}")
         return jsonify({"error": str(e)}), 500
 
-    data = request.get_json(force=True)
-    print("📩 Notificación de Mercado Pago recibida:", data)
-
-    try:
-        tipo = data.get("type") or data.get("topic")
-        if tipo == "payment":
-            payment_id = data["data"]["id"]
-            headers = {"Authorization": f"Bearer {ACCESS_TOKEN}"}
-            resp = requests.get(f"https://api.mercadopago.com/v1/payments/{payment_id}", headers=headers)
-            payment = resp.json()
-
-            payer = payment["payer"].get("email", "Desconocido")
-            amount = payment.get("transaction_amount", 0)
-            status = payment.get("status", "unknown")
-
-            # Clasificar tipo de pago
-            if amount >= 13:
-                tipo = "SORTEO"
-            else:
-                tipo = "IMPRESION"
-
-            # --- 💡 IMPRESIÓN RETARDADA + MENSAJE PREVIO ---
-            def delayed_print():
-                try:
-                    if printer_ready:
-                        # Mensaje previo
-                        msg = [
-                            "================================",
-                            "⏳ Reconectate al LIVE 🎥",
-                            "Volvé a TikTok...",
-                            "Tu ticket se imprimirá pronto!",
-                            "================================"
-                        ]
-                        print("🕒 Mensaje previo impreso, esperando 6s...")
-                    else:
-                        print("⚠️ Impresora no disponible para mensaje previo.")
-
-                    # Esperar 6 segundos antes del ticket real
-                    threading.Timer(6.0, print_payment_ticket, args=(payer, amount, status, tipo)).start()
-                except Exception as e:
-                    print(f"⚠️ Error en impresión diferida: {e}")
-
-            # Lanzar impresión en segundo plano
-            threading.Thread(target=delayed_print).start()
-            print(f"🕐 Impresión programada para {payer} (${amount}) con delay de 6s")
-
-        return jsonify({"status": "ok"}), 200
-    except Exception as e:
-        print(f"❌ Error procesando pago: {e}")
-        return jsonify({"error": str(e)}), 500
+    
 # ====================================================
 # MAIN
 # ====================================================

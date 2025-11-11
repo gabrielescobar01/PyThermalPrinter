@@ -3,7 +3,7 @@ import requests
 import os
 import json
 import random
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageEnhance
 from escpos.printer import Usb
 from datetime import datetime
 import threading
@@ -13,7 +13,7 @@ import socket, json
 # ====================================================
 # CONFIG
 # ====================================================
-ACCESS_TOKEN = "APP_USR-5730383643220019-110217-97d3d4394b8a9e2b9de6ca23cb88ad2e-2959448473"
+ACCESS_TOKEN = "APP_USR-4708500391203353-101921-06630c2067283d942cf41226049b5e51-340423884" #test: APP_USR-5730383643220019-110217-97d3d4394b8a9e2b9de6ca23cb88ad2e-2959448473
 NGROK_URL = "https://mxtechno.ngrok.app"
 app = Flask(__name__)
 
@@ -32,6 +32,10 @@ def enviar_a_impresora(texto, tipo="texto"):
 # ====================================================
 # UTILIDADES GRÁFICAS
 # ====================================================
+def _center_x(draw, txt, font, W):
+    # ancho real del texto
+    l, t, r, b = draw.textbbox((0,0), txt, font=font)
+    return (W - (r - l)) // 2
 
 
 def _safe_font(size=28):
@@ -79,6 +83,88 @@ def render_centered_text(lines, sizes, width=512, padding_y=15, gap=6, bold_line
 
     return img
 
+from PIL import Image, ImageDraw, ImageFont
+
+def _draw_vip_badge(base_img, cx, y_top, badge_height=270):
+    """Pega el icono VIP centrado, con espacio para el texto debajo."""
+    icon_path = os.path.join("avatars", "icon_vip.png")
+
+    if not os.path.exists(icon_path):
+        print("⚠️ No se encontró icon_vip.png, usando texto.")
+        draw = ImageDraw.Draw(base_img)
+        font = _safe_font(150)
+        txt = "VIP"
+        l, t, r, b = draw.textbbox((0, 0), txt, font=font)
+        draw.text((cx - (r-l)//2, y_top + (badge_height - (b-t))//2), txt, fill=0, font=font)
+        return
+
+    try:
+        from PIL import ImageEnhance
+        icon = Image.open(icon_path).convert("RGBA")
+
+        # Fondo blanco
+        bg = Image.new("RGBA", icon.size, (255, 255, 255, 255))
+        bg.paste(icon, mask=icon.split()[-1])
+        icon = bg.convert("RGB")
+
+        # Escalar (un poco más chico para dejar espacio)
+        target_w = int(base_img.width * 0.55)
+        ratio = target_w / icon.width
+        new_h = int(icon.height * ratio)
+        icon = icon.resize((target_w, new_h), Image.LANCZOS)
+
+        # Ajustes para térmica
+        icon = ImageEnhance.Contrast(icon).enhance(2.5)
+        icon = ImageEnhance.Brightness(icon).enhance(0.8)
+        gray = icon.convert("L")
+        bw = gray.point(lambda x: 0 if x < 200 else 255, "1")
+
+        # Centrado — con margen superior extra para que no choque el texto
+        x = (base_img.width - bw.width) // 2
+        y = y_top + 20  # 👈 bajá o subí este número si querés más o menos espacio
+        base_img.paste(bw, (x, y))
+
+        print("✅ Icono VIP centrado correctamente (con margen).")
+
+    except Exception as e:
+        print(f"⚠️ Error procesando icon_vip.png: {e}")
+
+def _draw_mp_logo(base_img, cx, y_top, max_width_ratio=0.6):
+    """Pega el logo de Mercado Pago centrado, sin fondo negro ni inversión."""
+    logo_path = os.path.join("avatars", "logo_mp.png")
+
+    if not os.path.exists(logo_path):
+        print("⚠️ No se encontró logo_mp.png")
+        return 0
+
+    try:
+        from PIL import ImageEnhance
+        logo = Image.open(logo_path).convert("RGBA")
+
+        # Escalar
+        target_w = int(base_img.width * max_width_ratio)
+        ratio = target_w / logo.width
+        new_h = int(logo.height * ratio)
+        logo = logo.resize((target_w, new_h), Image.LANCZOS)
+
+        # Fondo blanco (para limpiar transparencia)
+        bg = Image.new("RGBA", logo.size, (255, 255, 255, 255))
+        bg.paste(logo, (0, 0), logo)
+        logo = bg.convert("L")
+
+        # Aumentar contraste y brillo leve para térmica
+        logo = ImageEnhance.Contrast(logo).enhance(2.0)
+        logo = ImageEnhance.Brightness(logo).enhance(1.3)
+
+        # Centrado
+        x = (base_img.width - logo.width) // 2
+        base_img.paste(logo, (x, y_top))
+        print("✅ Logo Mercado Pago centrado correctamente.")
+        return y_top + logo.height  # devolvemos la nueva posición inferior
+
+    except Exception as e:
+        print(f"⚠️ Error procesando logo_mp.png: {e}")
+        return y_top + 150
 
 # ====================================================
 # ICONOS ALEATORIOS + FONDO ESTILO TABLERO
@@ -145,136 +231,108 @@ def preparar_icono_para_ticket(icono_path, max_width=384):
 # IMPRESIÓN DE TICKET ESTILIZADA
 # ====================================================
 def print_payment_ticket(payer, amount, status, tipo):
+    # lienzo base (512 px de ancho para 80mm; si tu impresora es 58mm usa 384)
+    W, H = 512, 860
+    img = Image.new("L", (W, H), 255)
+    draw = ImageDraw.Draw(img)
+
+    # fuentes
+    f_small  = _safe_font(26)
+    f_med    = _safe_font(32)
+    f_big    = _safe_font(40)
+    f_label  = _safe_font(28)
+
+    # marco
+    margin = 18
+    draw.rectangle([margin, margin, W-margin, H-margin], outline=0, width=3)
+
+    # --- ENCABEZADO ---
+    top_section = margin + 5
+
+    if tipo.upper() == "SORTEO":
+        # === VIP ===
+        _draw_vip_badge(img, cx=W // 2, y_top=top_section, badge_height=300)
+        y_band = top_section + 270
+        band_h = 60
+        draw.rectangle([margin, y_band, W - margin, y_band + band_h], fill=0)
+        txt = "PARTICIPANTE VIP"
+        x = _center_x(draw, txt, f_med, W - 2 * margin) + margin
+        draw.text((x, y_band + (band_h - 32) // 2), txt, fill=255, font=f_med)
+        y_band += band_h
+
+    else:
+        # === TICKET NORMAL ===
+        bottom_logo = _draw_mp_logo(img, cx=W // 2, y_top=top_section)
+        y_band = bottom_logo + 30
+        band_h = 0  # 👈 se define igual para evitar error
+        txt = "PAGO RECIBIDO"
+        x = _center_x(draw, txt, f_med, W - 2 * margin) + margin
+        draw.text((x, y_band), txt, fill=0, font=f_med)
+        y_band += 60
+
+
+    # bloque datos
+    y = y_band + band_h + 30
+    def center_line(text, font, y):
+        x = _center_x(draw, text, font, W)  # centrado global
+        draw.text((x, y), text, fill=0, font=font)
+        l,t,r,b = draw.textbbox((x,y), text, font=font)
+        return b
+
+    y = center_line("Usuario:", f_small, y) + 8
+    y = center_line(payer.upper(), f_big, y) + 10
+    y = center_line(f"Monto: ${int(amount):,}".replace(",", "."), f_small, y) + 6
     now = datetime.now().strftime("%d/%m/%Y %H:%M")
-    ref = "#" + str(random.randint(10000, 99999))
+    y = center_line(f"Fecha: {now}", f_small, y) + 18
 
-    # =========================================
-    # 💎 Texto diferenciado por tipo
-    # =========================================
-    if tipo == "SORTEO":
-        header = "⧫ PARTICIPANTE VIP ⧫"
-        footer = [
-            "✨ ¡Estás participando del sorteo en vivo! ✨",
-            f"N° de participación: {random.randint(1000, 9999)}",
-            "Seguime en IG: @maxii.agueroo"
-        ]
-        accent_line = "/ / /" * 18
+    # línea separadora fina centrada
+    draw.line([margin, y, W-margin, y], fill=0, width=2)
+    y += 18
+
+    # caja de mensaje según tipo
+    box_h = 100
+    draw.rectangle([margin, y, W - margin, y + box_h], outline=0, width=2)
+
+    if tipo.upper() == "SORTEO":
+        txt1 = "¡Estás participando"
+        txt2 = "del sorteo en vivo!"
     else:
-        header = "$  PAGO RECIBIDO  $"
-        footer = [
-            "♥ Gracias por tu apoyo ♥",
-            "Seguime en IG: @maxii.agueroo"
-        ]
-        accent_line = "=" * 30
+        txt1 = "¡Gracias por tu apoyo!"
+        txt2 = "¡Tu aporte hace posible el live!"
 
-    # =========================================
-    # 🖋️ Diseño del texto
-    # =========================================
-    lines = [
-        accent_line,
-        header,
-        accent_line,
-        "",
-        f"Usuario:",
-        f"{payer}",
-        "",
-        f"Monto: ${amount}",
-        f"Fecha: {now}",
-        "",
-        "-----------------------------",
-        *footer,
-        "-----------------------------"
-    ]
-
-    # Escalado de fuente más llamativo
-    if tipo == "SORTEO":
-        sizes = [28, 46, 28, 16, 26, 30, 18, 32, 28, 24, 18, 26, 22, 22]
-    else:
-        sizes = [24, 38, 24, 16, 26, 30, 18, 30, 26, 22, 18, 24, 22, 22]
-
-    # 💥 Negrita en el header y separadores
-    bold_indices = [1, 2]
-    img = render_centered_text(lines, sizes, bold_lines=bold_indices)
-    img.save("mp_ticket.bmp")
-
-# =========================================
-# 🖼️ Logo según tipo de ticket
-# =========================================
-    if tipo == "SORTEO":
-        vip_path = os.path.join(AVATAR_CACHE_DIR, "icon_vip.png")
-        logo_mp_path = os.path.join(AVATAR_CACHE_DIR, "logo_mp.png")
-        if os.path.exists(vip_path):
-            try:
-                # VIP grande centrado
-                vip = Image.open(vip_path).convert("RGBA")
-                vip_w = 400
-                ratio = vip_w / vip.width
-                vip = vip.resize((vip_w, int(vip.height * ratio)), Image.LANCZOS)
-                canvas = Image.new("RGBA", (512, vip.height + 60), (255, 255, 255, 255))
-                x_offset = (512 - vip.width) // 2
-                canvas.paste(vip, (x_offset, 20), vip)
-
-                # Logo MP pequeño en esquina inferior derecha
-                if os.path.exists(logo_mp_path):
-                    logo = Image.open(logo_mp_path).convert("RGBA")
-                    logo = logo.resize((90, int(logo.height * (90 / logo.width))), Image.LANCZOS)
-                    canvas.paste(logo, (512 - logo.width - 10, canvas.height - logo.height - 10), logo)
-
-                final_logo = canvas.convert("L")
-                final_logo = ImageOps.invert(final_logo)
-                final_logo.save("logo_final.bmp", "BMP")
-
-            except Exception as e:
-                print(f"⚠️ Error generando logo VIP: {e}")
-    else:
-        logo_path = os.path.join(AVATAR_CACHE_DIR, "logo_mp.png")
-        if os.path.exists(logo_path):
-            try:
-                logo = Image.open(logo_path).convert("RGBA")
-                logo_w = 350
-                ratio = logo_w / logo.width
-                logo = logo.resize((logo_w, int(logo.height * ratio)), Image.LANCZOS)
-
-                # Fondo blanco simple, sin tablero
-                fondo = Image.new("RGBA", (512, logo.height + 40), (255, 255, 255, 255))
-                x_offset = (512 - logo.width) // 2
-                fondo.paste(logo, (x_offset, 20), logo)
-
-                final_logo = fondo.convert("L")
-                final_logo = ImageOps.invert(final_logo)
-                final_logo.save("logo_final.bmp", "BMP")
-
-            except Exception as e:
-                print(f"⚠️ Error generando logo Mercado Pago: {e}")
-    # =========================================
-    # 🖨️ Envío al servidor de impresión
-    # =========================================
-    try:
-        payload = {
-            "tipo": "imagen",
-            "imagenes": []
-        }
-
-        # Logo
-        if os.path.exists("logo_final.bmp"):
-            payload["imagenes"].append("logo_final.bmp")
-
-        # Texto del ticket
-        if os.path.exists("mp_ticket.bmp"):
-            payload["imagenes"].append("mp_ticket.bmp")
-
-        # Enviar al servidor de impresión
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect(("127.0.0.1", 6000))
-        s.send(json.dumps(payload).encode("utf-8"))
-        s.close()
-
-        print(f"🧾 Ticket enviado al servidor ({tipo})")
-
-    except Exception as e:
-        print(f"⚠️ Error al enviar ticket: {e}")
+    x1 = _center_x(draw, txt1, f_label, W - 2 * margin) + margin
+    x2 = _center_x(draw, txt2, f_label, W - 2 * margin) + margin
+    draw.text((x1, y + 22), txt1, fill=0, font=f_label)
+    draw.text((x2, y + 22 + 30), txt2, fill=0, font=f_label)
+    y += box_h + 14
 
 
+    # caja IG
+    box_h2 = 100
+    draw.rectangle([margin, y, W-margin, y+box_h2], outline=0, width=2)
+    ig1 = "Sígueme en IG:"
+    ig2 = "@maxii.agueroo"
+    x1 = _center_x(draw, ig1, f_label, W - 2*margin) + margin
+    x2 = _center_x(draw, ig2, f_label, W - 2*margin) + margin
+    draw.text((x1, y + 22), ig1, fill=0, font=f_label)
+    draw.text((x2, y + 22 + 30), ig2, fill=0, font=f_label)
+
+    # recortar alto real (opcional, por si quedó largo)
+    # aquí no hace falta; la impresora corta con p.cut()
+
+    # guardar BMP 1-bit sin invertir (python-escpos imprime el negro tal cual)
+    bmp_path = "ticket_vip.bmp"
+    img = ImageOps.autocontrast(img)
+    img_1b = img.convert("1")  # dither por defecto
+    img_1b.save(bmp_path)
+
+    # enviar al servidor de impresión
+    payload = {"tipo": "imagen", "imagenes": [os.path.abspath(bmp_path)]}
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.connect(("127.0.0.1", 6000))
+    s.send(json.dumps(payload).encode("utf-8"))
+    s.close()
+    print("🖨️ Ticket VIP centrado enviado.")
 # ====================================================
 # RUTA: FORMULARIO DE DONACIÓN LIBRE
 # ====================================================
@@ -589,12 +647,12 @@ def mp_webhook():
         # 🎟 Clasificar tipo
         # 🎟 Clasificar tipo según monto
         if amount >= 1500:
-          tipo_ticket = "SORTEO"
-        elif amount >= 300:
-          tipo_ticket = "IMPRESION"
+            tipo_ticket = "SORTEO"
+        elif 300 <= amount < 1500:
+            tipo_ticket = "NORMAL"
         else:
-          print(f"⚠️ Donación de ${amount} ignorada (menor a $300).")
-          return jsonify({"status": "ignored"}), 200
+            print(f"⚠️ Donación de ${amount} ignorada (menor a $300).")
+            return jsonify({"status": "ignored"}), 200
 
 
         # --- 💡 IMPRESIÓN RETARDADA ---

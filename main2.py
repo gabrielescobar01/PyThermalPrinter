@@ -109,7 +109,7 @@ engine.setProperty("voice", "spanish")  # podés cambiarlo por otra voz disponib
 
 
 # ============ TIKTOK ============
-client = TikTokLiveClient(unique_id="s1mple.god")  # <- sin @
+client = TikTokLiveClient(unique_id="k2j999zx")  # <- sin @
 print("TikTokLive client initialized")
 
 config = load_config()

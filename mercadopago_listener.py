@@ -13,7 +13,7 @@ import socket, json
 # ====================================================
 # CONFIG
 # ====================================================
-ACCESS_TOKEN = "APP_USR-4708500391203353-101921-06630c2067283d942cf41226049b5e51-340423884" #test: APP_USR-5730383643220019-110217-97d3d4394b8a9e2b9de6ca23cb88ad2e-2959448473
+ACCESS_TOKEN = "APP_USR-5730383643220019-110217-97d3d4394b8a9e2b9de6ca23cb88ad2e-2959448473" #test: APP_USR-5730383643220019-110217-97d3d4394b8a9e2b9de6ca23cb88ad2e-2959448473 real: APP_USR-4708500391203353-101921-06630c2067283d942cf41226049b5e51-340423884
 NGROK_URL = "https://mxtechno.ngrok.app"
 app = Flask(__name__)
 
@@ -227,6 +227,29 @@ def preparar_icono_para_ticket(icono_path, max_width=384):
         return icono_path
 
 
+def obtener_numero_sorteo():
+    """Devuelve el número de sorteo actual (1–20) y actualiza el contador."""
+    contador_path = "contador_vip.json"
+
+    # si no existe el archivo, creamos uno con valor 1
+    if not os.path.exists(contador_path):
+        with open(contador_path, "w") as f:
+            json.dump({"numero": 1}, f)
+        return 1
+
+    # leer el contador actual
+    with open(contador_path, "r") as f:
+        data = json.load(f)
+    numero = data.get("numero", 1)
+
+    # incrementar y ciclar
+    siguiente = numero + 1 if numero < 20 else 1
+    with open(contador_path, "w") as f:
+        json.dump({"numero": siguiente}, f)
+
+    return numero
+
+
 # ====================================================
 # IMPRESIÓN DE TICKET ESTILIZADA
 # ====================================================
@@ -256,6 +279,7 @@ def print_payment_ticket(payer, amount, status, tipo):
         band_h = 60
         draw.rectangle([margin, y_band, W - margin, y_band + band_h], fill=0)
         txt = "PARTICIPANTE VIP"
+        numero_sorteo = obtener_numero_sorteo()
         x = _center_x(draw, txt, f_med, W - 2 * margin) + margin
         draw.text((x, y_band + (band_h - 32) // 2), txt, fill=255, font=f_med)
         y_band += band_h
@@ -341,52 +365,68 @@ HTML_FORM = """
 <html lang="es">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Donar a MXTECHNO</title>
   <style>
+    * {
+      box-sizing: border-box;
+    }
+
     body {
       font-family: 'Helvetica Neue', Arial, sans-serif;
-      background: #f9f9f9;
+      background: #f5f5f5;
       margin: 0;
       padding: 0;
       text-align: center;
     }
+
     header {
-      background: black;
+      background: #000;
       color: white;
-      padding: 30px 0 10px;
+      padding: 30px 10px 15px;
     }
+
     header img {
       width: 70px;
       height: 70px;
       border-radius: 50%;
       margin-bottom: 10px;
     }
+
     h1 {
       font-size: 22px;
       margin: 5px 0;
       letter-spacing: 1px;
     }
+
     p {
       color: #ccc;
       font-size: 14px;
+      margin: 0;
     }
+
     main {
       margin-top: 40px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
     }
+
     .card {
       background: white;
-      border-radius: 10px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      border-radius: 12px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.1);
       width: 400px;
       max-width: 90%;
-      margin: 0 auto;
-      padding: 30px;
+      padding: 30px 20px;
     }
+
     .card h2 {
       margin-top: 0;
       font-size: 18px;
       font-weight: 600;
     }
+
     .amount-input {
       font-size: 32px;
       width: 120px;
@@ -396,23 +436,30 @@ HTML_FORM = """
       outline: none;
       margin-top: 10px;
     }
+
     .suggestions {
       margin: 20px 0;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
     }
+
     .suggestions button {
       background: #eee;
       border: none;
-      padding: 10px 20px;
+      padding: 10px 18px;
       border-radius: 20px;
-      margin: 5px;
+      font-size: 15px;
       cursor: pointer;
-      font-size: 14px;
       transition: all 0.2s;
     }
+
     .suggestions button:hover {
       background: #0077ff;
       color: white;
     }
+
     .pay-button {
       background: #00b050;
       color: white;
@@ -423,36 +470,101 @@ HTML_FORM = """
       cursor: pointer;
       margin-top: 10px;
       transition: background 0.3s;
+      width: 100%;
+      max-width: 300px;
     }
+
     .pay-button:hover {
       background: #00913d;
     }
+
     footer {
-      margin-top: 40px;
-      color: #aaa;
+      margin-top: 50px;
+      color: #888;
       font-size: 14px;
+      padding-bottom: 30px;
     }
+
     .socials {
-      margin-top: 15px;
+      margin-top: 10px;
     }
+
     .socials a {
-      margin: 0 10px;
+      margin: 0 8px;
       text-decoration: none;
       color: #000;
       font-size: 20px;
+    }
+
+    /* 🔹 Ajustes responsivos */
+    @media (max-width: 480px) {
+      header img {
+        width: 60px;
+        height: 60px;
+      }
+
+      h1 {
+        font-size: 20px;
+      }
+
+      .card {
+        padding: 20px 15px;
+      }
+
+      .amount-input {
+        font-size: 28px;
+        width: 100px;
+      }
+
+      .pay-button {
+        font-size: 15px;
+        padding: 12px 20px;
+      }
+
+      .suggestions button {
+        padding: 8px 15px;
+        font-size: 14px;
+      }
+
+    .socials {
+    margin-top: 15px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 25px;
+    }
+
+    .social-icon {
+    width: 36px;
+    height: 36px;
+    transition: transform 0.2s, opacity 0.2s;
+    }
+
+    .social-icon:hover {
+    transform: scale(1.15);
+    opacity: 0.8;
+    }
+
+    @media (max-width: 480px) {
+    .social-icon {
+        width: 32px;
+        height: 32px;
+    }
+    }
+
     }
   </style>
 </head>
 <body>
   <header>
-    <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/3/32/TikTok_Icon_Black.svg/768px-TikTok_Icon_Black.svg.png" alt="TikTok">
     <h1>IMPRIME TICKETS EN VIVO!</h1>
     <p>Controla la impresora y participa en sorteos en directo 🎟</p>
   </header>
 
   <main>
     <div class="card">
-      <h2>💸 Aparecé en la impresora (mínimo $300)</h2>
+      <h2>💸 Aparecé en la impresora $300</h2>
+      <h2>💸 Aparecé en la impresora y participa del SORTEO $1500</h2>
       <form action="/crear_preferencia" method="POST">
         <label>Ingresá el monto que querés donar:</label><br>
         <div>
@@ -472,11 +584,15 @@ HTML_FORM = """
     </div>
   </main>
 
-  <footer>
+   <footer>
     <p>Pago seguro con Mercado Pago</p>
     <div class="socials">
-      <a href="https://www.tiktok.com/" target="_blank">🎵</a>
-      <a href="https://www.instagram.com/" target="_blank">📸</a>
+      <a href="https://www.tiktok.com/@mxtechno_" target="_blank">
+        <img src="https://img.icons8.com/?size=100&id=118638&format=png&color=000000" alt="TikTok" class="social-icon">
+      </a>
+      <a href="https://www.instagram.com/maxii.agueroo" target="_blank">
+        <img src="https://img.icons8.com/?size=100&id=32323&format=png&color=000000" alt="Instagram" class="social-icon">
+      </a>
     </div>
   </footer>
 
@@ -488,6 +604,7 @@ HTML_FORM = """
 </body>
 </html>
 """
+
 
 
 @app.route("/")
